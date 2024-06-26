@@ -1,6 +1,6 @@
 // ------------------------------------------------------------------------
 // SPDX-FileCopyrightText: Copyright © 2024 bomctl authors
-// SPDX-FileName: internal/pkg/save/save.go
+// SPDX-FileName: internal/pkg/export/export.go
 // SPDX-FileType: SOURCE
 // SPDX-License-Identifier: Apache-2.0
 // ------------------------------------------------------------------------
@@ -16,39 +16,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ------------------------------------------------------------------------
-package save
+package export
 
 import (
 	"fmt"
+	"os"
+
+	"github.com/charmbracelet/log"
+	"github.com/protobom/protobom/pkg/writer"
 
 	"github.com/bomctl/bomctl/internal/pkg/db"
 	"github.com/bomctl/bomctl/internal/pkg/utils"
 	"github.com/bomctl/bomctl/internal/pkg/utils/format"
-
-	"github.com/protobom/protobom/pkg/writer"
 )
 
-func Exec(sbomID, outputFile, fs, encoding string) error {
-	logger := utils.NewLogger("save")
+type (
+	ExportOptions struct {
+		Logger       *log.Logger
+		OutputFile   *os.File
+		FormatString string
+		Encoding     string
+		CacheDir     string
+		ConfigFile   string
+	}
+)
 
-	logger.Info(fmt.Sprintf("Saving %s SBOM ID", sbomID))
+func Export(sbomID string, opts *ExportOptions, backend *db.Backend) error {
+	logger := utils.NewLogger("export")
 
-	document, err := db.GetDocumentByID(sbomID)
+	logger.Info(fmt.Sprintf("Exporting %s SBOM ID", sbomID))
+
+	parsedFormat, err := format.Parse(opts.FormatString, opts.Encoding)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
 
-	parsedFormat, err := format.Parse(fs, encoding)
-	if err != nil {
-		return fmt.Errorf("%w", err)
-	}
-
-	writer := writer.New(
+	wr := writer.New(
 		writer.WithFormat(parsedFormat),
 	)
 
-	if err := writer.WriteFile(document, outputFile); err != nil {
+	document, err := backend.GetDocumentByID(sbomID)
+	if err != nil {
 		return fmt.Errorf("%w", err)
+	}
+
+	if opts.OutputFile != nil {
+		// Write the SBOM document bytes to file.
+		if err := wr.WriteFile(document, opts.OutputFile.Name()); err != nil {
+			return fmt.Errorf("%w", err)
+		}
+	} else {
+		// Write the SBOM document bytes to stdout.
+		if err := wr.WriteStream(document, os.Stdout); err != nil {
+			return fmt.Errorf("%w", err)
+		}
 	}
 
 	return nil

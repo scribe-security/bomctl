@@ -28,23 +28,25 @@ import (
 	"github.com/spf13/viper"
 )
 
-var (
-	cacheDir, cfgFile string
-	logger            *log.Logger
-	verbose           bool
+const (
+	minDebugLevel        = 2
+	readWriteExecuteUser = 0o700
 )
 
-const readWriteExecuteUser = 0o700
-
 func initCache() {
+	cacheDir := viper.GetString("cache_dir")
+
 	if cache, err := os.UserCacheDir(); cacheDir == "" && err == nil {
 		cacheDir = filepath.Join(cache, "bomctl")
+		viper.Set("cache_dir", cacheDir)
 	}
 
 	cobra.CheckErr(os.MkdirAll(cacheDir, os.FileMode(readWriteExecuteUser)))
 }
 
 func initConfig() {
+	cfgFile := viper.GetString("config_file")
+
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
@@ -59,13 +61,14 @@ func initConfig() {
 		viper.SetConfigName("bomctl")
 	}
 
+	viper.SetEnvPrefix("bomctl")
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 
-	viper.SetDefault("cache_dir", cacheDir)
+	cobra.CheckErr(os.MkdirAll(viper.GetString("cache_dir"), os.FileMode(readWriteExecuteUser)))
 }
 
 func rootCmd() *cobra.Command {
@@ -75,14 +78,17 @@ func rootCmd() *cobra.Command {
 		Use:     "bomctl",
 		Long:    "Simpler Software Bill of Materials management",
 		Version: Version,
-		PersistentPreRun: func(_ *cobra.Command, _ []string) {
-			if verbose {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			verbosity, err := cmd.Flags().GetCount("verbose")
+			cobra.CheckErr(err)
+
+			if verbosity > 0 {
 				log.SetLevel(log.DebugLevel)
 			}
 		},
 	}
 
-	rootCmd.PersistentFlags().StringVar(&cacheDir, "cache-dir", "",
+	rootCmd.PersistentFlags().String("cache-dir", "",
 		fmt.Sprintf("cache directory [defaults:\n\t%s\n\t%s\n\t%s",
 			"Unix:    $HOME/.cache/bomctl",
 			"Darwin:  $HOME/Library/Caches/bomctl",
@@ -90,7 +96,7 @@ func rootCmd() *cobra.Command {
 		),
 	)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
+	rootCmd.PersistentFlags().String("config", "",
 		fmt.Sprintf("config file [defaults:\n\t%s\n\t%s\n\t%s",
 			"Unix:    $HOME/.config/bomctl/bomctl.yaml",
 			"Darwin:  $HOME/Library/Application Support/bomctl/bomctl.yml",
@@ -98,10 +104,14 @@ func rootCmd() *cobra.Command {
 		),
 	)
 
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug output")
+	rootCmd.PersistentFlags().CountP("verbose", "v", "Enable debug output")
+
+	// Bind flags to their associated viper configurations.
+	cobra.CheckErr(viper.BindPFlag("cache_dir", rootCmd.PersistentFlags().Lookup("cache-dir")))
 
 	rootCmd.AddCommand(fetchCmd())
-	rootCmd.AddCommand(saveCmd())
+	rootCmd.AddCommand(exportCmd())
+	rootCmd.AddCommand(listCmd())
 	rootCmd.AddCommand(versionCmd())
 
 	return rootCmd

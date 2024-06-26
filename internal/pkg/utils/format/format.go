@@ -2,18 +2,51 @@ package format
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/protobom/protobom/pkg/formats"
 )
 
 var (
-	DefaultEncoding         = formats.JSON
-	DefaultSPDXJSONVersion  = formats.SPDX23JSON
-	DefaultSPDXTVVersion    = formats.SPDX23TV
-	DefaultCycloneDXVersion = formats.CDX15JSON
-	JSONFormatMap           = map[string]formats.Format{
+	errUnknownEncoding = errors.New("unknown encoding")
+	errUnknownFormat   = errors.New("unknown format")
+)
+
+const (
+	FormatStringOptions = `Output Format:
+	- spdx,
+	- spdx-2.3,
+	- cyclonedx,
+	- cyclonedx-1.0,cyclonedx-1.1,
+	- cyclonedx-1.2,
+	- cyclonedx-1.3,
+	- cyclonedx-1.4,
+	- cyclonedx-1.5
+	`
+)
+
+func DefaultSPDXJSONVersion() formats.Format {
+	return formats.SPDX23JSON
+}
+
+func DefaultSPDXTVVersion() formats.Format {
+	return formats.SPDX23TV
+}
+
+func DefaultCycloneDXVersion() formats.Format {
+	return formats.CDX15JSON
+}
+
+func DefaultEncoding() string {
+	return formats.JSON
+}
+
+func DefaultFormatString() string {
+	return "cyclonedx-1.5"
+}
+
+func JSONFormatMap() map[string]formats.Format {
+	return map[string]formats.Format{
 		"spdx":     formats.SPDXFORMAT,
 		"spdx-2.2": formats.SPDX22JSON,
 		"spdx-2.3": formats.SPDX23JSON,
@@ -26,69 +59,66 @@ var (
 		"cyclonedx-1.4": formats.CDX14JSON,
 		"cyclonedx-1.5": formats.CDX15JSON,
 	}
+}
 
-	TVFormatMap = map[string]formats.Format{
+func TVFormatMap() map[string]formats.Format {
+	return map[string]formats.Format{
 		"spdx":     formats.SPDXFORMAT,
 		"spdx-2.2": formats.SPDX22TV,
 		"spdx-2.3": formats.SPDX23TV,
 	}
+}
 
-	XMLFormatMap = map[string]formats.Format{}
-
-	JSONEncoding = formats.JSON
-	TEXTEncoding = formats.TEXT
-	SPDX         = formats.SPDXFORMAT
-	CDX          = formats.CDXFORMAT
-
-	EncodingMap = map[string]string{
+func EncodingMap() map[string]string {
+	return map[string]string{
 		"json": formats.JSON,
 		"xml":  formats.XML,
 		"text": formats.TEXT,
 	}
-)
+}
+
+func XMLFormatMap() map[string]formats.Format {
+	return map[string]formats.Format{}
+}
 
 type Format struct {
 	formats.Format
 }
 
-// Parse parses the format string into a formats.Format
-func Parse(fs string, encoding string) (formats.Format, error) {
+// Parse parses the format string into a formats.Format.
+func Parse(fs, encoding string) (formats.Format, error) {
 	if fs == "" {
-		return formats.EmptyFormat, errors.New("no format specified")
+		return formats.EmptyFormat, errUnknownFormat
 	}
 
-	s := strings.ToLower(fs)
 	var fm map[string]formats.Format
 
 	switch encoding {
 	case formats.JSON:
-		fm = JSONFormatMap
+		fm = JSONFormatMap()
 	case formats.TEXT:
-		fm = TVFormatMap
+		fm = TVFormatMap()
 	case formats.XML:
-		fm = XMLFormatMap
+		fm = XMLFormatMap()
 	default:
 		return formats.EmptyFormat,
-			fmt.Errorf("unknown encoding: %s", encoding)
-	}
-	f, ok := fm[s]
-	if !ok {
-		return formats.EmptyFormat, fmt.Errorf("unknown format: %s", fs)
+			errUnknownEncoding
 	}
 
-	if f == formats.SPDXFORMAT {
-		if encoding == formats.JSON {
-			return DefaultSPDXJSONVersion, nil
-		}
+	return DefaultVersion(fm, fs, encoding)
+}
 
-		if encoding == formats.TEXT {
-			return DefaultSPDXTVVersion, nil
-		}
+func DefaultVersion(fm map[string]formats.Format, fs, encoding string) (formats.Format, error) {
+	switch f, ok := fm[strings.ToLower(fs)]; {
+	case !ok:
+		return formats.EmptyFormat, errUnknownFormat
+	case f == formats.SPDXFORMAT && encoding == formats.JSON:
+		return DefaultSPDXJSONVersion(), nil
+	case f == formats.SPDXFORMAT && encoding == formats.TEXT:
+		return DefaultSPDXTVVersion(), nil
+	case f == formats.CDXFORMAT:
+		return DefaultCycloneDXVersion(), nil
+	default:
+		return f, nil
 	}
-
-	if f == formats.CDXFORMAT {
-		return DefaultCycloneDXVersion, nil
-	}
-
-	return f, nil
 }

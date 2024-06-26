@@ -22,52 +22,66 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/bomctl/bomctl/internal/pkg/fetch"
 	"github.com/bomctl/bomctl/internal/pkg/utils"
 )
 
 func fetchCmd() *cobra.Command {
-	fetchCmd := &cobra.Command{
-		Use:    "fetch [flags] SBOM_URL...",
-		Args:   cobra.MinimumNArgs(1),
-		PreRun: parseFetchPositionalArgs,
-		Short:  "Fetch SBOM file(s) from HTTP(S), OCI, or Git URLs",
-		Long:   "Fetch SBOM file(s) from HTTP(S), OCI, or Git URLs",
-		Run: func(_ *cobra.Command, _ []string) {
-			var err error
-			logger = utils.NewLogger("fetch")
+	opts := &fetch.FetchOptions{
+		Logger:   utils.NewLogger("fetch"),
+		UseNetRC: false,
+	}
 
-			for _, url := range sbomURLs {
-				if err = fetch.Exec(url, outputFile.String(), useNetRC); err != nil {
-					logger.Error(err)
+	outputFile := OutputFileValue("")
+	sbomURLs := URLSliceValue{}
+
+	fetchCmd := &cobra.Command{
+		Use:   "fetch [flags] SBOM_URL...",
+		Args:  cobra.MinimumNArgs(1),
+		Short: "Fetch SBOM file(s) from HTTP(S), OCI, or Git URLs",
+		Long:  "Fetch SBOM file(s) from HTTP(S), OCI, or Git URLs",
+		PreRun: func(_ *cobra.Command, args []string) {
+			sbomURLs = append(sbomURLs, args...)
+		},
+		Run: func(cmd *cobra.Command, _ []string) {
+			cfgFile, err := cmd.Flags().GetString("config")
+			cobra.CheckErr(err)
+
+			opts.CacheDir = viper.GetString("cache_dir")
+			opts.ConfigFile = cfgFile
+
+			verbosity, err := cmd.Flags().GetCount("verbose")
+			cobra.CheckErr(err)
+
+			opts.Debug = verbosity >= minDebugLevel
+
+			if string(outputFile) != "" {
+				if len(sbomURLs) > 1 {
+					opts.Logger.Fatal("The --output-file option cannot be used when more than one URL is provided.")
 				}
+
+				out, err := os.Create(string(outputFile))
+				if err != nil {
+					opts.Logger.Fatal("error creating output file", "outputFile", outputFile)
+				}
+
+				opts.OutputFile = out
+
+				defer opts.OutputFile.Close()
 			}
 
-			if err != nil {
-				os.Exit(1)
+			for _, url := range sbomURLs {
+				if err := fetch.Fetch(url, opts); err != nil {
+					opts.Logger.Fatal(err)
+				}
 			}
 		},
 	}
 
-	fetchCmd.Flags().VarP(
-		&outputFile,
-		"output-file",
-		"o",
-		"Path to output file",
-	)
-	fetchCmd.Flags().BoolVar(
-		&useNetRC,
-		"netrc",
-		false,
-		"Use .netrc file for authentication to remote hosts",
-	)
+	fetchCmd.Flags().VarP(&outputFile, "output-file", "o", "Path to output file")
+	fetchCmd.Flags().BoolVar(&opts.UseNetRC, "netrc", false, "Use .netrc file for authentication to remote hosts")
 
 	return fetchCmd
-}
-
-func parseFetchPositionalArgs(_ *cobra.Command, args []string) {
-	for _, arg := range args {
-		sbomURLs = append(sbomURLs, arg)
-	}
 }
